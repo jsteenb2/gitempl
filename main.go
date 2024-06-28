@@ -90,7 +90,7 @@ func (c *cli) runE(cmd *cobra.Command, args []string) error {
 	}
 	defer closeFn() // in case of early exit
 	
-	err = t.Execute(w, struct{ Commits []commit }{Commits: commits})
+	err = t.Execute(w, input{Commits: commits})
 	if err != nil {
 		return err
 	}
@@ -218,6 +218,78 @@ func statsHTML(in string) string {
 	return sb.String()
 }
 
+type input struct {
+	Commits commitSlc
+}
+
+type commitSlc []commit
+
+func (c commitSlc) DropByField(field, value string) commitSlc {
+	matchFn := fieldsMatcherGen(field, false)
+	return c.filter(func(c commit) bool {
+		return matchFn(c, value)
+	})
+}
+
+func (c commitSlc) KeepByField(field, value string) commitSlc {
+	matchFn := fieldsMatcherGen(field, true)
+	return c.filter(func(c commit) bool {
+		return matchFn(c, value)
+	})
+}
+
+func (c commitSlc) DropByNote(noteType, value string) commitSlc {
+	return c.filter(func(c commit) bool {
+		for _, n := range c.CC.Notes {
+			if n.Type == noteType && n.Value == value {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func (c commitSlc) KeepByNote(noteType, value string) commitSlc {
+	return c.filter(func(c commit) bool {
+		for _, n := range c.CC.Notes {
+			if n.Type == noteType && n.Value == value {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func (c commitSlc) filter(filterFn func(commit) bool) commitSlc {
+	var out commitSlc
+	for _, com := range c {
+		if filterFn(com) {
+			out = append(out, com)
+		}
+	}
+	return out
+}
+
+func fieldsMatcherGen(field string, keep bool) func(c commit, v string) bool {
+	cmpFn := func(a, b string) bool { return a == b }
+	if !keep {
+		cmpFn = func(a, b string) bool { return a != b }
+	}
+	return func(c commit, v string) bool {
+		
+		switch field {
+		case "Author":
+			return cmpFn(c.Author, v)
+		case "Scope":
+			return cmpFn(c.CC.Scope, v)
+		case "Type":
+			return cmpFn(c.CC.Type, v)
+		default:
+			return !keep
+		}
+	}
+}
+
 type (
 	commit struct {
 		Author    string
@@ -233,7 +305,7 @@ type (
 		Desc   string
 		Footer string
 		Header string
-		Notes  []note
+		Notes  noteSlc
 		Scope  string
 		Type   string
 	}
@@ -243,6 +315,18 @@ type (
 		Value string
 	}
 )
+
+type noteSlc []note
+
+func (n noteSlc) KeepByType(nType string) noteSlc {
+	var out noteSlc
+	for _, note := range n {
+		if note.Type == nType {
+			out = append(out, note)
+		}
+	}
+	return out
+}
 
 func parseGitTemplVars(r *git.Repository) ([]commit, error) {
 	iter, err := r.Log(&git.LogOptions{})
