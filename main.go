@@ -146,9 +146,6 @@ func (c *cli) output(file string, w io.Writer) (io.Writer, func() error, error) 
 }
 
 var (
-	statRegex      = regexp.MustCompile(`(?P<file>[\w.\-_/]+)\s*|\s*(?P<count>\d+)\s*(?P<additions>\+*)(?P<removals>-*)`)
-	statGroupNames = statRegex.SubexpNames()
-	
 	spaceRegex   = regexp.MustCompile(`\s+`)
 	nonwordRegex = regexp.MustCompile(`[^0-9a-z-]+`)
 )
@@ -163,7 +160,7 @@ var funcMap = template.FuncMap{
 		s = nonwordRegex.ReplaceAllString(s, "")
 		return s
 	},
-	"statsHTML": statsHTML,
+	"statsHTMLTable": statsHTMLTable,
 	"title": func(s string) string {
 		if s == "" {
 			return ""
@@ -179,47 +176,12 @@ var funcMap = template.FuncMap{
 	},
 }
 
-func statsHTML(in string) string {
-	var (
-		sb         strings.Builder
-		line       string
-		firstWrite bool
-	)
-	writeLine := func(line string) {
-		if !firstWrite {
-			sb.WriteString("| File | Count | Diff |\n")
-			sb.WriteString("| ------ | ------ | ------ |\n")
-			firstWrite = true
-		}
-		if !strings.HasSuffix(line, "|") {
-			line += " |"
-		}
-		sb.WriteString(line + "\n")
-	}
-	for _, matches := range statRegex.FindAllStringSubmatch(in, -1) {
-		for groupIdx, match := range matches {
-			if groupIdx == 0 || match == "" {
-				continue
-			}
-			switch statGroupNames[groupIdx] {
-			case "file":
-				if line != "" {
-					writeLine(line)
-				}
-				line = fmt.Sprintf(`| [%[1]s](%[1]s) `, match)
-			case "count":
-				line += fmt.Sprintf(`| **%s** | `, match)
-			case "additions":
-				line += fmt.Sprintf(`<span style="color:green">%s</span>`, match)
-			case "removals":
-				line += fmt.Sprintf(`<span style="color:red">%s</span>`, match)
-			}
-		}
-	}
-	if line != "" {
-		writeLine(line)
-	}
-	return sb.String()
+func newCount(s string) string {
+	return fmt.Sprintf(" **%s**", s)
+}
+
+func newColorSpan(color, s string) string {
+	return fmt.Sprintf(`<span style="color:%s">%s</span>`, color, s)
 }
 
 type input struct {
@@ -382,4 +344,103 @@ func parseGitTemplVars(r *git.Repository) ([]commit, error) {
 	
 	slices.Reverse(commits)
 	return commits, err
+}
+
+var (
+	statRegex      = regexp.MustCompile(`(?P<file>[\w.\-/]+[ =>]*[\w.\-/]+)\s*|\s*(?P<count>\d+)\s*(?P<additions>\+*)(?P<removals>-*)`)
+	statGroupNames = statRegex.SubexpNames()
+)
+
+func statsHTMLTable(in string) string {
+	var (
+		sb         strings.Builder
+		line       string
+		firstWrite bool
+		
+		fileLenMax, countLenMax, diffLenMax int
+		diffLen                             int
+	)
+	writeLine := func(line string) {
+		if !firstWrite {
+			sb.WriteString(fmt.Sprintf(
+				"| File%s| Count%s| Diff%s|\n",
+				strings.Repeat(" ", max(0, fileLenMax-5)),
+				strings.Repeat(" ", max(0, countLenMax-6)),
+				strings.Repeat(" ", max(0, diffLenMax-5)),
+			))
+			sb.WriteString(fmt.Sprintf(
+				"|%s|%s|%s|\n",
+				strings.Repeat("-", fileLenMax),
+				strings.Repeat("-", countLenMax),
+				strings.Repeat("-", diffLenMax),
+			))
+			firstWrite = true
+		}
+		if !strings.HasSuffix(line, "|") {
+			line += strings.Repeat(" ", max(0, diffLenMax-diffLen-1))
+			line += "|"
+		}
+		diffLen = 0
+		sb.WriteString(line + "\n")
+	}
+	for _, matches := range statRegex.FindAllStringSubmatch(in, -1) {
+		for groupIdx, match := range matches {
+			if groupIdx == 0 || match == "" {
+				continue
+			}
+			switch statGroupNames[groupIdx] {
+			case "file":
+				diffLenMax, diffLen = max(diffLenMax, diffLen+2), 0
+				fileLenMax = max(fileLenMax, len(newFileLink(match))+1)
+			case "count":
+				countLenMax = max(countLenMax, len(newCount(match))+1)
+			case "additions":
+				diffLen = len(newColorSpan("green", match))
+			case "removals":
+				diffLen += len(newColorSpan("red", match))
+			}
+		}
+	}
+	diffLenMax = max(diffLenMax, diffLen+2)
+	
+	diffLen = 0
+	for _, matches := range statRegex.FindAllStringSubmatch(in, -1) {
+		for groupIdx, match := range matches {
+			if groupIdx == 0 || match == "" {
+				continue
+			}
+			switch statGroupNames[groupIdx] {
+			case "file":
+				if line != "" {
+					writeLine(line)
+				}
+				link := newFileLink(match)
+				line = fmt.Sprintf(`|%s%s`, link, strings.Repeat(" ", max(0, fileLenMax-len(link))))
+			case "count":
+				count := newCount(match)
+				line += fmt.Sprintf(`|%s%s| `, count, strings.Repeat(" ", max(0, countLenMax-len(count))))
+			case "additions":
+				adds := newColorSpan("green", match)
+				diffLen = len(adds)
+				line += adds
+			case "removals":
+				removals := newColorSpan("red", match)
+				diffLen += len(removals)
+				line += removals
+			}
+		}
+	}
+	if line != "" {
+		writeLine(line)
+	}
+	return sb.String()
+}
+
+func newFileLink(s string) string {
+	parts := strings.SplitN(s, " => ", 2)
+	dest := parts[0]
+	if len(parts) == 2 {
+		dest = parts[1]
+	}
+	return fmt.Sprintf(" [%s](%s)", s, dest)
 }

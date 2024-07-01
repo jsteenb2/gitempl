@@ -14,7 +14,7 @@ func TestCmd(t *testing.T) {
 	
 	tmplIn := strings.NewReader(`
 {{ range .Commits }}
-	{{ .Stats | statsHTML }}
+	{{ .Stats | statsHTMLTable }}
 {{end}}
 `)
 	cmd.SetIn(tmplIn)
@@ -341,7 +341,7 @@ func Test_statsHTML(t *testing.T) {
  wild-workouts/internal/trainer/service/component_test.go             |  108 +++++++++++++++++++++++++++++++++++++++++++++++++++++
  wild-workouts/sql/schema.sql                                         |    6 ++++++`
 	
-	t.Log(statsHTML(raw))
+	t.Log(statsHTMLTable(raw))
 }
 
 func commitEq(t *testing.T, want, got commit) {
