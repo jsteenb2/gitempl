@@ -148,6 +148,9 @@ func (c *cli) output(file string, w io.Writer) (io.Writer, func() error, error) 
 var (
 	statRegex      = regexp.MustCompile(`(?P<file>[\w.\-_/]+)\s*|\s*(?P<count>\d+)\s*(?P<additions>\+*)(?P<removals>-*)`)
 	statGroupNames = statRegex.SubexpNames()
+	
+	spaceRegex   = regexp.MustCompile(`\s+`)
+	nonwordRegex = regexp.MustCompile(`[^0-9a-z-]+`)
 )
 
 var funcMap = template.FuncMap{
@@ -155,9 +158,10 @@ var funcMap = template.FuncMap{
 		return a + b
 	},
 	"markdownHeaderLink": func(s string) string {
-		s = strings.ReplaceAll(s, " ", "-")
-		s = strings.ReplaceAll(s, ".", "-")
-		return strings.ToLower(s)
+		s = strings.ToLower(s)
+		s = spaceRegex.ReplaceAllString(s, "-")
+		s = nonwordRegex.ReplaceAllString(s, "")
+		return s
 	},
 	"statsHTML": statsHTML,
 	"title": func(s string) string {
